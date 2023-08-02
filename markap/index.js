@@ -1,75 +1,137 @@
-function getMoney(userData, bankData) {
-  return new Promise((resolve, reject) => {
-    const viewBalance = window.confirm('Переглянути баланс картки?');
+const parse = (response) => JSON.parse(response);
 
-    const currencies = Object.keys(bankData).join(', ');
+function checkBalance(userData, bankData) {
+  const isCheckBalance = confirm('Бажаєте переглянути баланс?');
 
-    if (viewBalance) { 
-      const currency = prompt(`Введіть валюту, щоб переглянути баланс у форматі: ${currencies}`).toUpperCase().replace(/ /g, '');
-      const balance = userData[currency];
-      if (balance !== undefined) {
-        console.log(`Баланс складає: ${balance} ${currency}`);
-        resolve();
+  if (isCheckBalance) {
+    getAvailableCurrencies()
+      .then((data) => {
+        const currencies = Object.keys(data.userData);
+        const selectedCurrency = prompt(`Введіть валюту для перегляду балансу (доступні валюти: ${currencies.join(', ')})`).toUpperCase().trim().replace(/ /g, '');
+
+        if (!data.userData.hasOwnProperty(selectedCurrency)) {
+          console.log('Не вірно вказана валюта, спробуйте ще раз.');
+          checkBalance(userData);
+        } else {
+          console.log(`Ваш баланс складає ${userData[selectedCurrency]} ${selectedCurrency}`);
+          showThankYouMessage();
+        }
+      })
+      .catch((err) => {
+        handleWithdrawError(err, userData, bankData);
+      });
+  } else {
+    getCurrencyForWithdrawal(userData, bankData);
+  }
+}
+
+function showThankYouMessage() {
+  console.log('Дякуємо, гарного дня 😊');
+}
+
+function handleWithdrawError(err, userData, bankData) {
+  if (err.userData && err.bankData) {
+    const userData = err.userData;
+    const bankData = err.bankData;
+
+    const currenciesWithNoBills = Object.keys(userData).filter(currency => bankData[currency].max === 0);
+
+    if (currenciesWithNoBills.length > 0) {
+      const selectedCurrency = prompt(`Банкомат не має купюр у валютах: ${currenciesWithNoBills.join(', ')}. Введіть валюту для зняття готівки або натисніть "Скасувати" для продовження.`);
+
+      if (selectedCurrency === null) {
+        getCurrencyForWithdrawal(userData, bankData);
       } else {
-        alert('Введено невірну валюту. Спробуйте ще раз.');
-        resolve(getMoney(userData, bankData));
+        withdrawMoney(userData, bankData, selectedCurrency);
       }
     } else {
-      const currency = prompt(`Введіть валюту для виведення коштів:у форматі: ${currencies}`).toUpperCase().replace(/ /g, '').trim();
-      const amount = parseFloat(prompt('Введіть суму для виведення:'));
-
-      const currencyData = bankData[currency];
-
-      if (currencyData && amount >= currencyData.min && amount <= currencyData.max) {
-        console.log(`Ось ваша готівка. ${amount} ${currency} ${currencyData.img}`);
-        resolve();
-      } else if (!currencyData) {
-        alert('Введено невірну валюту. Спробуйте ще раз.');
-        resolve(getMoney(userData, bankData));
-      } else if (amount < currencyData.min) {
-        alert(`Введена сума менша за дозволений мінімум. Мінімальна сума виведення: ${currencyData.min}`);
-        resolve(getMoney(userData, bankData));
-      } else if (amount > currencyData.max) {
-        alert(`Введена сума перевищує дозволений максимум. Максимальна сума виведення: ${currencyData.max}`);
-        resolve(getMoney(userData, bankData));
-      }
+      console.log('Помилка: Немає доступних валют для зняття готівки.');
     }
-  }).then(() => {
-    console.log('Дякуємо, гарного вам дня 😊');
-  }).catch(() => {
-    console.log('Дякуємо, гарного вам дня 😊');
+  } else {
+    console.log('Операція скасована.');
+    showThankYouMessage();
+  }
+}
+
+function getCurrencyForWithdrawal(userData, bankData) {
+  const currencies = Object.keys(bankData);
+  const currencyInput = prompt(`Введіть валюту для зняття готівки (${currencies.join(', ')})`);
+
+  if (currencyInput === null) {
+    console.log('Операція скасована.');
+    showThankYouMessage();
+    return;
+  }
+
+  const formattedCurrencyInput = currencyInput.toUpperCase().trim().replace(/ /g, '');
+
+  if (!bankData.hasOwnProperty(formattedCurrencyInput) || !bankData.hasOwnProperty(formattedCurrencyInput)) {
+    console.log('Невірно вказана валюта, спробуйте ще раз');
+    getCurrencyForWithdrawal(userData, bankData);
+  } else {
+    withdrawMoney(userData, bankData, formattedCurrencyInput);
+  }
+}
+
+function withdrawMoney(userData, bankData, currency) {
+  const amount = parseInt(prompt(`Введіть суму для зняття готівки у валюті ${currency} (максимальна сума: ${bankData[currency].max}, мінімальна сума: ${bankData[currency].min})`));
+
+  if (isNaN(amount)) {
+    console.log('Введена некоректна сума. Будь ласка, спробуйте ще раз.');
+    withdrawMoney(userData, bankData, currency);
+    return;
+  }
+
+  if (amount < bankData[currency].min) {
+    console.log(`Введена сума менша за дозволений мінімум. Мінімальна сума виведення: ${bankData[currency].min}`);
+    showThankYouMessage();
+    return;
+  }
+
+  if (amount > bankData[currency].max) {
+    console.log(`Введена сума перевищує дозволений максимум. Максимальна сума зняття: ${bankData[currency].max}`);
+    showThankYouMessage();
+    return;
+  }
+
+  if (amount > userData[currency]) {
+    console.log('Недостатньо коштів на балансі.');
+    showThankYouMessage();
+    return;
+  }
+
+  userData[currency] -= amount;
+  console.log(`Ось ваші готівкові ${amount} ${currency} ${bankData[currency].img}`);
+  showThankYouMessage();
+}
+
+function getMoney(userData, bankData) {
+  const isCheckBalance = confirm('Бажаєте переглянути баланс?');
+
+  return new Promise((resolve, reject) => {
+    isCheckBalance ? resolve(userData) : reject({ userData, bankData });
   });
 }
 
-let userData = {
-  'USD': 1000,
-  'EUR': 900,
-  'UAH': 15000,
-  'BIF': 20000,
-  'AOA': 100
-};
+function getAvailableCurrencies() {
+  return new Promise((resolve, reject) => {
+    const controller = new XMLHttpRequest();
+    controller.open('GET', 'atm.json');
+    controller.send();
+  
+    controller.addEventListener('readystatechange', () => {
+      if (controller.readyState === 4) {
+        controller.status < 400 ? resolve(parse(controller.response)) : reject(controller.status);
+      }
+    });
+  });
+}
 
-let bankData = {
-  'USD': {
-    max: 3000,
-    min: 100,
-    img: '💵'
-  },
-  'EUR': {
-    max: 1000,
-    min: 50,
-    img: '💶'
-  },
-  'UAH': {
-    max: 0,
-    min: 0,
-    img: '💴'
-  },
-  'GBP': {
-    max: 10000,
-    min: 100,
-    img: '💷'
-  }
-};
+getAvailableCurrencies()
+  .then((data) => {
+    const userData = data.userData;
+    const bankData = data.bankData;
 
-getMoney(userData, bankData);
+    checkBalance(userData, bankData);
+  })
+  .catch((err) => console.log(err));
